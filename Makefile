@@ -55,7 +55,7 @@ destroy:
 	@echo "==> Destroy complete. Bootstrap VM, VNet A, and admin KV are untouched."
 
 # ── Environment file ─────────────────────────────────────────────────────────
-# Reads Terraform outputs and writes .env for docker-compose
+# Reads Terraform outputs and writes .env for docker compose
 env:
 	@echo "Generating .env from Terraform outputs..."
 	@KV_URI=$$(cd $(TGDIR)/keyvault && terragrunt output -raw key_vault_uri 2>/dev/null); \
