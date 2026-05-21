@@ -1,170 +1,192 @@
 # Robots Inc. Azure Infrastructure Challenge
 
+**Candidate:** Fabio Carvalho
+**Repository:** https://github.com/fcarvalhodev/infra-challenge
+
+---
+
+## Quick Start for Reviewers
+
+The deployment is live on the bootstrap VM. To verify:
+
+    curl -sk https://localhost/health
+
+To get the API key and run all tests:
+
+    cd ~/challenge
+    az login --identity --client-id 297f855a-c1c3-4a2a-94c8-04e9b4557c62
+    export API_KEY=$(cd infra/live/dev/keyvault && terragrunt output -raw api_key_value)
+
+    # API tests (28 tests)
+    cd api/tests && API_BASE_URL=https://localhost API_KEY=$API_KEY python3 -m pytest -v
+
+    # Infrastructure tests (5 tests)
+    cd ~/challenge/tests/infra && go test -v -timeout 30m ./...
+
+---
+
 ## Architecture
 
-```mermaid
-graph TD
-    subgraph "VNet A — 10.0.0.0/16 (provided)"
-        VM["vm-fabio-001\n(bootstrap VM)\nPublic IP: 20.89.55.213"]
-        VM -->|"system-assigned MI\n(vm-mi)"| VMID[("vm-mi\nfc77b65c...")]
-    end
+    VNet A (10.0.0.0/16) — provided
+    └── vm-fabio-001 (Caddy :443 → API :8000)
+        └── vm-mi (system-assigned)
+            ├── Reader → Resource Group
+            ├── Key Vault Secrets User → kv-fabio-dev-1df2f8
+            └── Storage Blob Data Reader → stfabiodev8803c819
 
-    subgraph "VNet B — 10.1.0.0/16 (candidate)"
-        subgraph "snet-storage (10.1.0.0/24)"
-            PE["Private Endpoint\npe-storage-fabio-dev"]
-        end
-    end
+    VNet B (10.1.0.0/16) — candidate
+    └── snet-storage (10.1.0.0/24) + NSG
+        └── pe-storage-fabio-dev (10.1.0.4)
+            └── stfabiodev8803c819
+                └── healthcheck/ping.txt
 
-    subgraph "rg-devtest-lab-interviews"
-        KV["Key Vault\nkv-fabio-dev-*\n(api-key secret)"]
-        SA["Storage Account\nstfabiodev*\n(healthcheck/ping.txt)"]
-        LAW["Log Analytics\nlaw-fabio-dev"]
-        DNS["Private DNS Zone\nprivatelink.blob.core.windows.net"]
-    end
+    Private DNS: privatelink.blob.core.windows.net
+    └── linked to VNet A and VNet B
+        └── A record: stfabiodev8803c819 → 10.1.0.4
 
-    VNetPeer["VNet Peering\nA <-> B (bidirectional)"]
+---
 
-    VM -->|"HTTPS (private)"| PE --> SA
-    VM -->|"RBAC: Key Vault Secrets User"| KV
-    VM -->|"RBAC: Reader"| RG["Resource Group"]
-    DNS -->|"A record → PE IP"| PE
-    SA --> LAW
-    KV --> LAW
-    VNet_A_DNS["DNS link"] --> DNS
-    VNet_B_DNS["DNS link"] --> DNS
-```
+## Identity Lanes
 
-### Identity lanes
-
-```
-vm-mi (system-assigned)   ──► Reader on RG
-                           ──► Key Vault Secrets User on app KV
-                           ──► Storage Blob Data Reader on app SA
-
-id-manager (user-assigned) ──► Contributor on RG  [provisioning only]
-                           ──► Key Vault Secrets Officer on app KV [provisioning only, via access-manager]
-
-access-manager (user-assigned) ──► RBAC Admin on RG [role assignment only]
-```
+| Identity | Role | Scope | Purpose |
+|---|---|---|---|
+| vm-mi (system-assigned) | Reader | Resource Group | Running API — list resources |
+| vm-mi (system-assigned) | Key Vault Secrets User | App Key Vault | Running API — read api-key |
+| vm-mi (system-assigned) | Storage Blob Data Reader | Storage Account | Running API — read ping.txt |
+| id-manager (user-assigned) | Contributor | Resource Group | Terraform provisioning only |
+| id-manager (user-assigned) | Key Vault Secrets Officer | App Key Vault | Terraform secret write (provisioning only) |
+| access-manager (user-assigned) | RBAC Admin | Resource Group | Terraform role assignments only |
 
 ---
 
 ## RBAC Matrix
 
-| Identity | Resource | Role | Can read api-key | Can read ping.txt | Can list RG resources | Can write storage | Can create/delete resources | Can assign roles |
-|---|---|---|---|---|---|---|---|---|
-| `vm-mi` | App KV | Key Vault Secrets User | ✅ | — | — | ❌ | ❌ | ❌ |
-| `vm-mi` | App SA | Storage Blob Data Reader | — | ✅ | — | ❌ | ❌ | ❌ |
-| `vm-mi` | RG | Reader | — | — | ✅ | ❌ | ❌ | ❌ |
-| `id-manager` | RG | Contributor | ❌ | ❌ | ✅ | ❌ | ✅ | ❌ |
-| `id-manager` | App KV | Key Vault Secrets Officer | ✅ (write+read) | — | — | — | — | ❌ |
-| `access-manager` | RG | RBAC Admin (constrained) | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ (no Owner/Contributor) |
+| Identity | Read api-key | Read ping.txt | List RG | Write storage | Create resources | Assign roles |
+|---|---|---|---|---|---|---|
+| vm-mi | YES | YES | YES | NO | NO | NO |
+| id-manager | YES (write+read) | NO | YES | NO | YES | NO |
+| access-manager | NO | NO | NO | NO | NO | YES |
+
+---
+
+## Prerequisites (one-time setup on the bootstrap VM)
+
+    # Terragrunt
+    curl -sL https://github.com/gruntwork-io/terragrunt/releases/download/v0.58.0/terragrunt_linux_amd64 \
+      -o /usr/local/bin/terragrunt && sudo chmod +x /usr/local/bin/terragrunt
+
+    # Docker Compose v2
+    DOCKER_CONFIG=${DOCKER_CONFIG:-$HOME/.docker}
+    mkdir -p $DOCKER_CONFIG/cli-plugins
+    curl -SL https://github.com/docker/compose/releases/download/v2.27.0/docker-compose-linux-x86_64 \
+      -o $DOCKER_CONFIG/cli-plugins/docker-compose && chmod +x $DOCKER_CONFIG/cli-plugins/docker-compose
+
+    # Go (for Terratest)
+    curl -sL https://go.dev/dl/go1.21.11.linux-amd64.tar.gz | sudo tar -C /usr/local -xz
+    export PATH=$PATH:/usr/local/go/bin
+
+    # Python test deps
+    pip3 install pytest requests
 
 ---
 
 ## Step-by-step Deploy
 
-### Prerequisites (on the bootstrap VM)
+### 1. Clone the repository
 
-```bash
-# Install Terragrunt
-TGVER=0.58.0
-curl -sL "https://github.com/gruntwork-io/terragrunt/releases/download/v${TGVER}/terragrunt_linux_amd64" \
-  -o /usr/local/bin/terragrunt && chmod +x /usr/local/bin/terragrunt
+    git clone https://github.com/fcarvalhodev/infra-challenge.git challenge
+    cd challenge
 
-# Install Terraform
-TFVER=1.8.5
-curl -sL "https://releases.hashicorp.com/terraform/${TFVER}/terraform_${TFVER}_linux_amd64.zip" \
-  -o /tmp/tf.zip && unzip /tmp/tf.zip -d /usr/local/bin/
+### 2. Fill in tag values from the assignment email
 
-# Install Go (for Terratest)
-curl -sL https://go.dev/dl/go1.21.11.linux-amd64.tar.gz | sudo tar -C /usr/local -xz
-export PATH=$PATH:/usr/local/go/bin
+    find infra/live -name "terragrunt.hcl" | xargs sed -i \
+      's/CostCenter   = "FILL_ME"/CostCenter   = "<your-value>"/g'
+    find infra/live -name "terragrunt.hcl" | xargs sed -i \
+      's/AssignmentId = "FILL_ME"/AssignmentId = "<your-value>"/g'
 
-# Install Python test deps
-pip3 install pytest requests
-```
+### 3. Login as id-manager (provisioning identity)
 
-### 1. Fill in tag values
+    az login --identity --client-id 297f855a-c1c3-4a2a-94c8-04e9b4557c62
 
-Edit the two placeholder values in every `terragrunt.hcl` leaf file:
+### 4. Initialize Terraform
 
-```bash
-find infra/live -name "terragrunt.hcl" | xargs sed -i \
-  's/CostCenter   = "FILL_ME"/CostCenter   = "<your-value>"/g; \
-   s/AssignmentId = "FILL_ME"/AssignmentId = "<your-value>"/g'
-```
+    make init ENV=dev
 
-### 2. Login as id-manager for provisioning
+### 5. Deploy all infrastructure modules
 
-```bash
-az login --identity --client-id 297f855a-c1c3-4a2a-94c8-04e9b4557c62
-```
+    make apply ENV=dev
 
-### 3. Deploy infrastructure
+Modules deploy in this order:
 
-```bash
-make apply ENV=dev
-```
+1. networking — VNet B, NSG, VNet peering A to B, private DNS zone
+2. storage — storage account, private endpoint, ping.txt blob
+3. keyvault — application Key Vault, api-key secret
+4. observability — Log Analytics, diagnostic settings, metric alert
+5. rbac — 3 role assignments for vm-mi via access-manager
 
-This runs modules in dependency order: networking → storage → keyvault → observability → rbac.
+### 6. Start the API
 
-### 4. Write .env and start the API
+    # Stop system Caddy if it is occupying port 80/443
+    sudo systemctl stop caddy 2>/dev/null || true
 
-```bash
-make env ENV=dev
-make docker-up
-```
+    # Write .env from Terraform outputs
+    make env ENV=dev
 
-### 5. Smoke test
+    # Build and start API + Caddy
+    make docker-up
 
-```bash
-curl http://localhost/health
-# {"status":"ok"}
+    # Verify
+    curl -sk https://localhost/health
 
-API_KEY=$(cd infra/live/dev/keyvault && terragrunt output -raw api_key_value)
-curl -H "X-API-Key: $API_KEY" http://localhost/storage/ping
-```
+### 7. Enable real HTTPS when DNS hostname is provided
 
-### 6. Enable HTTPS (when DNS is ready)
+Replace localhost in caddy/Caddyfile with the assigned hostname:
 
-Edit `caddy/Caddyfile`: replace `:80` with your hostname, e.g.:
+    fabio.interviews.robots-inc.io {
+        reverse_proxy api:8000
+    }
 
-```
-fabio.interviews.robots-inc.io {
-    reverse_proxy api:8000
-}
-```
+Then restart Caddy — it will obtain a Let's Encrypt certificate automatically:
 
-Then `make docker-up` — Caddy auto-provisions a Let's Encrypt cert.
+    docker compose restart caddy
 
 ---
 
 ## Step-by-step Destroy
 
-Destroys only candidate-managed resources. Bootstrap VM, VNet A, admin KV, id-manager, and access-manager are **not touched**.
+Destroys only candidate-managed resources. Bootstrap VM, VNet A, admin Key Vault, id-manager, and access-manager are never touched.
 
-```bash
-make destroy ENV=dev
-```
+    # Stop containers
+    make docker-down
 
-Or manually in reverse order:
+    # Login as id-manager
+    az login --identity --client-id 297f855a-c1c3-4a2a-94c8-04e9b4557c62
 
-```bash
-cd infra/live/dev
-# Login as access-manager first (for RBAC deletions)
-az login --identity --client-id 1c984177-182e-4d71-8fd0-99989661976e
-cd rbac && terragrunt destroy -auto-approve && cd ..
+    # Destroy all modules in reverse order
+    make destroy ENV=dev
 
-# Switch to id-manager for resource deletions
-az login --identity --client-id 297f855a-c1c3-4a2a-94c8-04e9b4557c62
-cd observability && terragrunt destroy -auto-approve && cd ..
-cd keyvault      && terragrunt destroy -auto-approve && cd ..
-cd storage       && terragrunt destroy -auto-approve && cd ..
-cd networking    && terragrunt destroy -auto-approve && cd ..
+---
 
-docker compose down
-```
+## Running Tests
+
+### API tests — 28 tests
+
+    az login --identity --client-id 297f855a-c1c3-4a2a-94c8-04e9b4557c62
+    export API_KEY=$(cd infra/live/dev/keyvault && terragrunt output -raw api_key_value)
+    cd api/tests && API_BASE_URL=https://localhost API_KEY=$API_KEY python3 -m pytest -v
+
+### Infrastructure tests — 5 tests
+
+    az login --identity --client-id 297f855a-c1c3-4a2a-94c8-04e9b4557c62
+    cd tests/infra && go test -v -timeout 30m ./...
+
+What the infra tests validate:
+
+- VNet peering is Connected in both directions
+- Every candidate subnet has an NSG with no 0.0.0.0/0 inbound rule
+- Storage FQDN resolves to private IP 10.1.0.4
+- Storage public network access is disabled
+- vm-mi has exactly 3 role assignments with no privileged roles
 
 ---
 
@@ -172,46 +194,77 @@ docker compose down
 
 ### NSG rules
 
-The storage subnet NSG allows inbound HTTPS only from VNet A (`10.0.0.0/16`) — the CIDR that contains the bootstrap VM. Everything else inbound is denied at priority 4000. There is no `0.0.0.0/0` inbound allow rule. Outbound traffic is only permitted back to VNet A and within VNet B. This gives the tightest envelope that still allows the private endpoint to function correctly.
+The storage subnet NSG allows inbound HTTPS only from VNet A (10.0.0.0/16), which is the CIDR containing the bootstrap VM. All other inbound traffic is denied at priority 4000. There is no 0.0.0.0/0 allow rule anywhere. Outbound is permitted only back to VNet A and within VNet B.
 
-### Why runtime uses vm-mi while provisioning uses id-manager
+### Why vm-mi for runtime and id-manager for provisioning
 
-Least privilege by lane. The running API only ever reads (secrets, blobs, resource listings) — it never needs to create or modify infrastructure. Giving it a Contributor identity would let a container escape become an infrastructure escape. id-manager is scoped to Contributor on the RG so Terraform can provision resources; it cannot assign roles, preventing privilege escalation. The two identities are never mixed.
+Least privilege by lane. The running API only reads — it never creates or modifies infrastructure. Giving it Contributor would turn a container escape into an infrastructure escape. id-manager is Contributor for provisioning but cannot assign roles, preventing privilege escalation.
 
-### How the API authenticates to Key Vault and ARM without storing credentials
+### How the API authenticates without storing credentials
 
-`ManagedIdentityCredential()` (no `client_id` argument) acquires an OAuth2 token from the Azure IMDS endpoint (`169.254.169.254`) using the VM's system-assigned identity. The token is short-lived and automatically refreshed by the SDK. No secrets, no service principal keys, no environment variables with credentials.
+ManagedIdentityCredential() with no client_id argument uses the system-assigned identity. It acquires short-lived OAuth2 tokens from the Azure IMDS endpoint (169.254.169.254). Tokens are automatically refreshed by the SDK. No secrets, no service principal keys, no credentials in environment variables.
 
-### Why the API secret lives in a candidate-owned Key Vault
+### Why a candidate-owned Key Vault instead of the shared admin vault
 
-The shared administrative KV (`dtlinterviews3004`) is interviewer-managed infrastructure. Storing the API key there would: (a) require granting vm-mi access to an interviewer resource, (b) make teardown leave traces in a vault we don't own, and (c) violate the principle of resource ownership boundaries.
+The shared KV (dtlinterviews3004) is interviewer-managed infrastructure. Storing the API key there would require granting vm-mi access to a vault we do not own, leave traces after teardown, and violate the resource ownership boundary defined in the challenge.
 
 ### Metric alert choice
 
-**Key Vault Availability < 100%** for 5 minutes. Justification: if the KV becomes unavailable, the API cannot fetch its `api-key` secret at startup. This causes total service failure with no visible error to callers (the container simply fails to start). The alert provides early warning before the KV issue becomes a deployment failure. Dev severity = Warning (2); prod severity = Error (1).
+Key Vault Availability below 100% for 5 minutes. If the KV becomes unavailable, the API cannot fetch its api-key at startup, causing total service failure with no visible error to callers. The alert provides early warning before a KV issue becomes a deployment failure. Dev uses Warning severity; prod uses Error severity.
 
 ### Recurring cost resources
 
 | Resource | Cost driver | Mitigation |
 |---|---|---|
-| Private Endpoint | ~$7/month per endpoint | One PE per env; removed in dev teardown |
-| Log Analytics | Per-GB ingestion + retention | 30-day retention; 0.5 GB/day cap (dev), 1 GB/day (prod) |
-| Storage Account | Capacity + transactions | LRS in dev; ZRS only in prod |
-| Public IP | ~$3/month (standard static) | Interviewer-provided; not duplicated |
+| Private Endpoint | ~$7/month | One PE per env; removed on destroy |
+| Log Analytics | Per-GB ingestion | 30-day retention; 0.5 GB/day cap in dev, 1 GB/day in prod |
+| Storage Account | Capacity and transactions | LRS in dev; ZRS only in prod |
 
-VNets, NSGs, managed identities, RBAC assignments, private DNS zones — no meaningful direct cost.
-
-### id-manager Key Vault Secrets Officer assignment
-
-Terraform (running as id-manager) needs to write the `api-key` secret to the application KV. With RBAC authorization enabled on the KV, Contributor on the RG does not grant data-plane secret write access. The assignment is created by access-manager (the only identity permitted to write role assignments), used only during `terraform apply`, and is documented in the RBAC matrix. It is **not** used by the running API; vm-mi has the narrower `Key Vault Secrets User` (read-only) for runtime.
+VNets, NSGs, managed identities, RBAC assignments, and private DNS zones have no meaningful direct cost.
 
 ---
 
-## Known Issues / Things I'd Do With More Time
+## What Was Provided vs What Was Created
 
-- **TLS**: Caddy is configured for HTTP; needs a real hostname delegated before Let's Encrypt can issue a cert. The Caddyfile change is one line.
-- **Prod isolation**: Both environments share the same resource group (lab constraint). In production I'd use separate subscriptions per environment.
-- **State backend bootstrapping**: The `stinterviewtfstate001` backend was pre-created by the interviewer. A full bootstrap script would create it using `az` CLI before the first `terragrunt init`.
-- **Terratest**: Go test uses `DefaultAzureCredential` which picks up the VM's system-assigned identity at runtime. For CI, you'd pass a service principal via env vars.
-- **Secret rotation**: The `api-key` is set once at `terraform apply`. A production setup would use Key Vault secret rotation with an Event Grid trigger.
-- **`/resources` filter**: Currently filters by `Owner=fabio` tag. A more robust filter would use a dedicated `AssignmentId` tag value passed at deploy time.
+### Provided by interviewer — not modified
+
+- vm-fabio-001 — bootstrap VM
+- vnet-lab-interviews — VNet A (10.0.0.0/16)
+- dtlinterviews3004 — shared admin Key Vault
+- id-manager-fabio-001 — provisioning identity
+- access-manager-fabio-001 — RBAC assignment identity
+- stinterviewtfstate001 — Terraform state backend
+
+### Created by this solution
+
+- vnet-b-fabio-dev — VNet B (10.1.0.0/16)
+- nsg-storage-fabio-dev — NSG for storage subnet
+- snet-storage-fabio-dev — storage subnet (10.1.0.0/24)
+- stfabiodev8803c819 — storage account (LRS, public access disabled)
+- pe-storage-fabio-dev — private endpoint (10.1.0.4)
+- privatelink.blob.core.windows.net — private DNS zone + VNet links
+- kv-fabio-dev-1df2f8 — application Key Vault
+- law-fabio-dev — Log Analytics workspace
+- 3 role assignments for vm-mi
+
+---
+
+## Missing Items — Pending Interviewer Input
+
+| Item | What is needed | Current state |
+|---|---|---|
+| Real TLS certificate | DNS hostname delegation | Self-signed cert on localhost. One-line Caddyfile change when hostname is provided. |
+| CostCenter tag value | Value from assignment email | Placeholder: interview-lab |
+| AssignmentId tag value | Value from assignment email | Placeholder: fabio-001 |
+
+---
+
+## Known Issues and Things I Would Do With More Time
+
+- State backend auth: Currently uses account key (listKeys) for the Terraform backend. Proper least-privilege would grant each identity Storage Blob Data Contributor on the tfstate container and use use_azuread_auth = true. Blocked by access-manager not having Contributor on the state account.
+
+- Secret rotation: The api-key is set once at terraform apply. A production setup would use Key Vault rotation policies with an Event Grid trigger.
+
+- Prod environment: Terragrunt is fully configured for prod with ZRS storage, stricter alert thresholds, and a separate state key. Not deployed as the interviewer confirmed dev is sufficient for the assessment.
+
+- Observability deprecations: azurerm v4 deprecated the metric block in diagnostic settings in favour of enabled_metric. Will be a breaking change in v5.
