@@ -27,22 +27,41 @@ To get the API key and run all tests:
 
 ## Architecture
 
-    VNet A (10.0.0.0/16) — provided
-    └── vm-fabio-001 (Caddy :443 → API :8000)
-        └── vm-mi (system-assigned)
-            ├── Reader → Resource Group
-            ├── Key Vault Secrets User → kv-fabio-dev-1df2f8
-            └── Storage Blob Data Reader → stfabiodev8803c819
+````mermaid
+graph TD
+    subgraph VNetA["VNet A 10.0.0.0/16 — provided"]
+        VM["vm-fabio-001
+Caddy :443 → API :8000"]
+        VMID["vm-mi system-assigned"]
+        VM --> VMID
+    end
 
-    VNet B (10.1.0.0/16) — candidate
-    └── snet-storage (10.1.0.0/24) + NSG
-        └── pe-storage-fabio-dev (10.1.0.4)
-            └── stfabiodev8803c819
-                └── healthcheck/ping.txt
+    subgraph VNetB["VNet B 10.1.0.0/16 — candidate"]
+        subgraph Subnet["snet-storage 10.1.0.0/24 + NSG"]
+            PE["pe-storage-fabio-dev
+10.1.0.4"]
+        end
+    end
 
-    Private DNS: privatelink.blob.core.windows.net
-    └── linked to VNet A and VNet B
-        └── A record: stfabiodev8803c819 → 10.1.0.4
+    subgraph RG["rg-devtest-lab-interviews"]
+        KV["kv-fabio-dev-1df2f8
+api-key secret"]
+        SA["stfabiodev8803c819
+healthcheck/ping.txt"]
+        LAW["law-fabio-dev
+30d retention 0.5GB/day cap"]
+        DNS["privatelink.blob.core.windows.net"]
+    end
+
+    VMID -->|"Storage Blob Data Reader"| PE
+    PE --> SA
+    VMID -->|"Key Vault Secrets User"| KV
+    VMID -->|"Reader"| RG
+    DNS -->|"A record 10.1.0.4"| PE
+    SA --> LAW
+    KV --> LAW
+    VNetA -.->|"VNet Peering"| VNetB
+```
 
 ---
 
