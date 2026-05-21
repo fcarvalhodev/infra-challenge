@@ -1,15 +1,11 @@
-# Caddyfile
-#
-# To enable HTTPS (Let's Encrypt), replace ":80" with your hostname:
-#   fabio.interviews.robots-inc.io
-# Caddy will obtain a cert automatically when the A record is live.
-#
-# For the current phase (no DNS yet), plain HTTP on port 80.
+{
+    # Use internal CA (self-signed) — no external DNS needed
+    local_certs
+}
 
-:80 {
+localhost {
     reverse_proxy api:8000
 
-    # Basic access log
     log {
         output stdout
         format json
