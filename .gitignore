@@ -1,0 +1,31 @@
+# Terraform / Terragrunt
+**/.terraform/
+**/.terragrunt-cache/
+*.tfstate
+*.tfstate.backup
+*.tfplan
+backend.tf
+providers.tf
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Secrets and local config
+.env
+*.pem
+*.key
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# Go
+tests/infra/vendor/
+tests/infra/go.sum
+
+# OS
+.DS_Store

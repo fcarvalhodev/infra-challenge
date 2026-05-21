@@ -1,0 +1,34 @@
+version: "3.8"
+
+services:
+  api:
+    build: ./api
+    restart: unless-stopped
+    # All values are infrastructure config (non-secret).
+    # KEY_VAULT_URL and STORAGE_ACCOUNT_NAME come from Terraform outputs (see Makefile).
+    environment:
+      - SUBSCRIPTION_ID=128100a8-3b59-40af-882c-7c6c91a676a2
+      - RESOURCE_GROUP_NAME=rg-devtest-lab-interviews
+      - VM_PRINCIPAL_ID=fc77b65c-f439-44d6-b674-9beb9a5ca81a
+      - KEY_VAULT_URL=${KEY_VAULT_URL}
+      - STORAGE_ACCOUNT_NAME=${STORAGE_ACCOUNT_NAME}
+    # Only accessible from Caddy (localhost); not exposed directly to the internet
+    expose:
+      - "8000"
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - api
+
+volumes:
+  caddy_data:
+  caddy_config:
