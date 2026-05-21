@@ -1,5 +1,5 @@
 # dev/terragrunt.hcl — common inputs shared by all dev modules
-# This file is NOT a leaf; it's included by leaf modules via find_in_parent_folders()
+# This file is NOT a leaf; it's included by leaf modules via find_in_parent_folders("root.hcl")
 # to pick up the root remote_state and provider generate blocks.
 # Leaf modules re-include the root with an explicit path.
 locals {
