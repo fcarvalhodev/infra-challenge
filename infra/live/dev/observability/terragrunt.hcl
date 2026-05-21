@@ -7,7 +7,7 @@ dependency "keyvault" {
   mock_outputs = {
     key_vault_id = "/subscriptions/mock/resourceGroups/mock/providers/Microsoft.KeyVault/vaults/mock"
   }
-  mock_outputs_allowed_terraform_commands = ["validate", "plan"]
+  mock_outputs_allowed_terraform_commands = ["validate", "plan", "init", "run-all init"]
 }
 
 dependency "storage" {
@@ -15,7 +15,7 @@ dependency "storage" {
   mock_outputs = {
     storage_account_id = "/subscriptions/mock/resourceGroups/mock/providers/Microsoft.Storage/storageAccounts/mock"
   }
-  mock_outputs_allowed_terraform_commands = ["validate", "plan"]
+  mock_outputs_allowed_terraform_commands = ["validate", "plan", "init", "run-all init"]
 }
 
 terraform {
@@ -33,7 +33,7 @@ inputs = {
   tags = {
     Owner        = "fabio"
     Environment  = "dev"
-    CostCenter   = "FILL_ME"
-    AssignmentId = "FILL_ME"
+    CostCenter   = "interview-lab"
+    AssignmentId = "fabio-001"
   }
 }

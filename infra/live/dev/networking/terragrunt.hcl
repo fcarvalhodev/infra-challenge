@@ -23,7 +23,7 @@ inputs = {
   tags = {
     Owner        = "fabio"
     Environment  = "dev"
-    CostCenter   = "FILL_ME"
-    AssignmentId = "FILL_ME"
+    CostCenter   = "interview-lab"
+    AssignmentId = "fabio-001"
   }
 }

@@ -8,7 +8,7 @@ dependency "networking" {
     storage_subnet_id   = "/subscriptions/mock/resourceGroups/mock/providers/Microsoft.Network/virtualNetworks/mock/subnets/mock"
     private_dns_zone_id = "/subscriptions/mock/resourceGroups/mock/providers/Microsoft.Network/privateDnsZones/mock"
   }
-  mock_outputs_allowed_terraform_commands = ["validate", "plan"]
+  mock_outputs_allowed_terraform_commands = ["validate", "plan", "init", "run-all init"]
 }
 
 terraform {
@@ -25,7 +25,7 @@ inputs = {
   tags = {
     Owner        = "fabio"
     Environment  = "dev"
-    CostCenter   = "FILL_ME"
-    AssignmentId = "FILL_ME"
+    CostCenter   = "interview-lab"
+    AssignmentId = "fabio-001"
   }
 }
