@@ -1,22 +1,8 @@
-# ---------------------------------------------------------------------------
-# storage/main.tf
-# Creates:
-#   • Storage account — public blob access disabled; LRS (dev) or ZRS (prod)
-#   • Container "healthcheck" and blob "ping.txt" for /storage/ping endpoint
-#   • Private endpoint in VNet B storage subnet
-#   • Private DNS zone group wires the PE into the blob private DNS zone
-#
-# Auth for provisioning: azurerm_storage_blob uses account-key auth
-# (storage_use_azuread = false in provider) so id-manager's Contributor role
-# on the RG is sufficient — no extra data-plane RBAC assignment required.
-# ---------------------------------------------------------------------------
-
 resource "random_id" "storage_suffix" {
   byte_length = 4
 }
 
 locals {
-  # 3-24 chars, lowercase alphanumeric only
   storage_account_name = "stfabio${var.environment}${random_id.storage_suffix.hex}"
 }
 
@@ -25,16 +11,14 @@ resource "azurerm_storage_account" "main" {
   resource_group_name      = var.resource_group_name
   location                 = var.location
   account_tier             = "Standard"
-  account_replication_type = var.replication_type # LRS (dev) or ZRS (prod)
+  account_replication_type = var.replication_type
   account_kind             = "StorageV2"
 
-  # Disable all public blob access — only private endpoint is valid
   public_network_access_enabled   = false
   allow_nested_items_to_be_public = false
-
-  # Require HTTPS; TLS 1.2 minimum
-  https_traffic_only_enabled = true
-  min_tls_version           = "TLS1_2"
+  https_traffic_only_enabled      = true
+  min_tls_version                 = "TLS1_2"
+  shared_access_key_enabled       = true
 
   blob_properties {
     delete_retention_policy {
@@ -45,21 +29,6 @@ resource "azurerm_storage_account" "main" {
   tags = var.tags
 }
 
-resource "azurerm_storage_container" "healthcheck" {
-  name                  = "healthcheck"
-  storage_account_name  = azurerm_storage_account.main.name
-  container_access_type = "private"
-}
-
-resource "azurerm_storage_blob" "ping" {
-  name                   = "ping.txt"
-  storage_account_name   = azurerm_storage_account.main.name
-  storage_container_name = azurerm_storage_container.healthcheck.name
-  type                   = "Block"
-  source_content         = "pong"
-}
-
-# ── Private Endpoint ─────────────────────────────────────────────────────────
 resource "azurerm_private_endpoint" "blob" {
   name                = "pe-storage-fabio-${var.environment}"
   location            = var.location
@@ -74,9 +43,44 @@ resource "azurerm_private_endpoint" "blob" {
     is_manual_connection           = false
   }
 
-  # Wire the PE NIC into the private DNS zone so the FQDN resolves to a private IP
   private_dns_zone_group {
     name                 = "dns-group-blob-${var.environment}"
     private_dns_zone_ids = [var.private_dns_zone_id]
   }
+}
+
+# Create container and upload ping.txt using account key via az CLI.
+# azurerm v4 dropped storage_use_azuread=false; id-manager has no data-plane
+# role so we fall back to key-based auth. The VM reaches the SA over the
+# private endpoint (VNet A peered to VNet B, DNS zone linked to both).
+resource "null_resource" "healthcheck_blob" {
+  triggers = {
+    storage_account_id = azurerm_storage_account.main.id
+  }
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      set -e
+      echo "Waiting for private endpoint DNS to propagate..."
+      sleep 30
+      KEY=$(az storage account keys list \
+        --account-name ${azurerm_storage_account.main.name} \
+        --resource-group ${var.resource_group_name} \
+        --query '[0].value' -o tsv)
+      az storage container create \
+        --name healthcheck \
+        --account-name ${azurerm_storage_account.main.name} \
+        --account-key "$KEY"
+      echo "pong" | az storage blob upload \
+        --account-name ${azurerm_storage_account.main.name} \
+        --container-name healthcheck \
+        --name ping.txt \
+        --data "pong" \
+        --account-key "$KEY" \
+        --overwrite
+      echo "healthcheck/ping.txt uploaded successfully"
+    EOT
+  }
+
+  depends_on = [azurerm_private_endpoint.blob]
 }
