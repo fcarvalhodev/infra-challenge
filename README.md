@@ -1,6 +1,6 @@
 # Robots Inc. Azure Infrastructure Challenge
 
-**Candidate:** Fabio Carvalho
+**Candidate:** Fabio Carvalho  
 **Repository:** https://github.com/fcarvalhodev/infra-challenge
 
 ---
@@ -27,40 +27,35 @@ To get the API key and run all tests:
 
 ## Architecture
 
-````mermaid
+```mermaid
 graph TD
-    subgraph VNetA["VNet A 10.0.0.0/16 — provided"]
-        VM["vm-fabio-001
-Caddy :443 → API :8000"]
-        VMID["vm-mi system-assigned"]
+    subgraph VNetA["VNet A — 10.0.0.0/16 — provided"]
+        VM["vm-fabio-001\nCaddy :443 to API :8000"]
+        VMID["vm-mi — system-assigned MI"]
         VM --> VMID
     end
 
-    subgraph VNetB["VNet B 10.1.0.0/16 — candidate"]
+    subgraph VNetB["VNet B — 10.1.0.0/16 — candidate"]
         subgraph Subnet["snet-storage 10.1.0.0/24 + NSG"]
-            PE["pe-storage-fabio-dev
-10.1.0.4"]
+            PE["pe-storage-fabio-dev\n10.1.0.4"]
         end
     end
 
-    subgraph RG["rg-devtest-lab-interviews"]
-        KV["kv-fabio-dev-1df2f8
-api-key secret"]
-        SA["stfabiodev8803c819
-healthcheck/ping.txt"]
-        LAW["law-fabio-dev
-30d retention 0.5GB/day cap"]
+    subgraph Resources["rg-devtest-lab-interviews"]
+        KV["kv-fabio-dev-1df2f8\napi-key secret"]
+        SA["stfabiodev8803c819\nhealthcheck/ping.txt"]
+        LAW["law-fabio-dev\n30d retention — 0.5GB/day cap"]
         DNS["privatelink.blob.core.windows.net"]
     end
 
     VMID -->|"Storage Blob Data Reader"| PE
     PE --> SA
     VMID -->|"Key Vault Secrets User"| KV
-    VMID -->|"Reader"| RG
+    VMID -->|"Reader"| Resources
     DNS -->|"A record 10.1.0.4"| PE
     SA --> LAW
     KV --> LAW
-    VNetA -.->|"VNet Peering"| VNetB
+    VNetA -.->|"VNet Peering bidirectional"| VNetB
 ```
 
 ---
@@ -69,12 +64,12 @@ healthcheck/ping.txt"]
 
 | Identity | Role | Scope | Purpose |
 |---|---|---|---|
-| vm-mi (system-assigned) | Reader | Resource Group | Running API — list resources |
-| vm-mi (system-assigned) | Key Vault Secrets User | App Key Vault | Running API — read api-key |
-| vm-mi (system-assigned) | Storage Blob Data Reader | Storage Account | Running API — read ping.txt |
-| id-manager (user-assigned) | Contributor | Resource Group | Terraform provisioning only |
-| id-manager (user-assigned) | Key Vault Secrets Officer | App Key Vault | Terraform secret write (provisioning only) |
-| access-manager (user-assigned) | RBAC Admin | Resource Group | Terraform role assignments only |
+| vm-mi system-assigned | Reader | Resource Group | Running API — list resources |
+| vm-mi system-assigned | Key Vault Secrets User | App Key Vault | Running API — read api-key |
+| vm-mi system-assigned | Storage Blob Data Reader | Storage Account | Running API — read ping.txt |
+| id-manager user-assigned | Contributor | Resource Group | Terraform provisioning only |
+| id-manager user-assigned | Key Vault Secrets Officer | App Key Vault | Terraform secret write — provisioning only |
+| access-manager user-assigned | RBAC Admin | Resource Group | Terraform role assignments only |
 
 ---
 
@@ -83,12 +78,12 @@ healthcheck/ping.txt"]
 | Identity | Read api-key | Read ping.txt | List RG | Write storage | Create resources | Assign roles |
 |---|---|---|---|---|---|---|
 | vm-mi | YES | YES | YES | NO | NO | NO |
-| id-manager | YES (write+read) | NO | YES | NO | YES | NO |
+| id-manager | YES write+read | NO | YES | NO | YES | NO |
 | access-manager | NO | NO | NO | NO | NO | YES |
 
 ---
 
-## Prerequisites (one-time setup on the bootstrap VM)
+## Prerequisites — one-time setup on the bootstrap VM
 
     # Terragrunt
     curl -sL https://github.com/gruntwork-io/terragrunt/releases/download/v0.58.0/terragrunt_linux_amd64 \
@@ -100,7 +95,7 @@ healthcheck/ping.txt"]
     curl -SL https://github.com/docker/compose/releases/download/v2.27.0/docker-compose-linux-x86_64 \
       -o $DOCKER_CONFIG/cli-plugins/docker-compose && chmod +x $DOCKER_CONFIG/cli-plugins/docker-compose
 
-    # Go (for Terratest)
+    # Go for Terratest
     curl -sL https://go.dev/dl/go1.21.11.linux-amd64.tar.gz | sudo tar -C /usr/local -xz
     export PATH=$PATH:/usr/local/go/bin
 
@@ -123,7 +118,7 @@ healthcheck/ping.txt"]
     find infra/live -name "terragrunt.hcl" | xargs sed -i \
       's/AssignmentId = "FILL_ME"/AssignmentId = "<your-value>"/g'
 
-### 3. Login as id-manager (provisioning identity)
+### 3. Login as id-manager
 
     az login --identity --client-id 297f855a-c1c3-4a2a-94c8-04e9b4557c62
 
@@ -261,7 +256,7 @@ VNets, NSGs, managed identities, RBAC assignments, and private DNS zones have no
 - snet-storage-fabio-dev — storage subnet (10.1.0.0/24)
 - stfabiodev8803c819 — storage account (LRS, public access disabled)
 - pe-storage-fabio-dev — private endpoint (10.1.0.4)
-- privatelink.blob.core.windows.net — private DNS zone + VNet links
+- privatelink.blob.core.windows.net — private DNS zone and VNet links
 - kv-fabio-dev-1df2f8 — application Key Vault
 - law-fabio-dev — Log Analytics workspace
 - 3 role assignments for vm-mi
